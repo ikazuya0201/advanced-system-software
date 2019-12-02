@@ -22,28 +22,60 @@ int po;
 
 
 
-#define MPU6050_ADDR 0x68
-#define MPU6050_AX  0x3B
-#define MPU6050_AY  0x3D
-#define MPU6050_AZ  0x3F
-#define MPU6050_TP  0x41    //  data not used
-#define MPU6050_GX  0x43
-#define MPU6050_GY  0x45
-#define MPU6050_GZ  0x47
+#define MPU9250_ADDR 0x68
+#define MPU9250_AX  0x3B
+#define MPU9250_AY  0x3D
+#define MPU9250_AZ  0x3F
+#define MPU9250_TP  0x41    //  data not used
+#define MPU9250_GX  0x43
+#define MPU9250_GY  0x45
+#define MPU9250_GZ  0x47
 
-
+struct PalletPosition {
+  float position_x;
+  float position_y;
+  float position_z;
+};
+struct PalletInfo {
+  uint8_t color;
+  boolean reset_flag;
+};
+xQueueHandle PalletInfoQueue = xQueueCreate(1, sizeof(PalletInfo));
 void task0(void* arg) {
   int cnt = 0;
   TickType_t xLastWakeTime;
   const uint32_t calledFrequency = 100;
   const TickType_t xFrequency = configTICK_RATE_HZ / calledFrequency;
-
   while (1) {
     po = cnt;
     //printf("task2 thread_cnt=%ld\n", cnt++);
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
   }
 }
+void buttonTask(void* arg) {
+  uint8_t buttonA_GPIO = 37;
+  uint8_t buttonB_GPIO = 38;
+  uint8_t buttonC_GPIO = 39;
+  uint8_t COLOR_TYPE = 5;
+  const uint32_t calledFrequency = 100;
+  TickType_t xLastWakeTime;
+  const TickType_t xFrequency = configTICK_RATE_HZ / calledFrequency;
+  pinMode(buttonA_GPIO, INPUT);
+  pinMode(buttonB_GPIO, INPUT);
+  pinMode(buttonC_GPIO, INPUT);
+  PalletInfo pallet_info;
+  bool last_buttonA = false;
+  while (1) {
+    if (digitalRead(buttonA_GPIO) == 0){
+      if(last_buttonA == true) pallet_info.color = (pallet_info.color + 1) % COLOR_TYPE;
+    }
+    last_buttonA = digitalRead(buttonA_GPIO);
+    pallet_info.reset_flag = (digitalRead(buttonC_GPIO) == 0) ? true : false;
+    xQueueSendToBack(PalletInfoQueue, &pallet_info, 0);
+    vTaskDelayUntil(&xLastWakeTime, xFrequency);
+  }
+}
+
 void task1(void* arg) {
   int cnt = 0;
   TickType_t xLastWakeTime;
@@ -56,33 +88,32 @@ void task1(void* arg) {
   delay(300);
   Wire.begin();
 
-  Wire.beginTransmission(MPU6050_ADDR);
+  Wire.beginTransmission(MPU9250_ADDR);
   Wire.write(0x6B);
-  Wire.write(0x80);  //  0x00:2g, 0x08:4g, 0x10:8g, 0x18:16g
+  Wire.write(0x80);
   Wire.endTransmission();
-  Wire.beginTransmission(MPU6050_ADDR);
+  Wire.beginTransmission(MPU9250_ADDR);
   Wire.write(0x6B);
-  Wire.write(0x00);  //  0x00:2g, 0x08:4g, 0x10:8g, 0x18:16g
+  Wire.write(0x00);
   Wire.endTransmission();
-  Wire.beginTransmission(MPU6050_ADDR);
+  Wire.beginTransmission(MPU9250_ADDR);
   Wire.write(0x1C);
-  Wire.write(0x00);  //  0x00:2g, 0x08:4g, 0x10:8g, 0x18:16g
+  Wire.write(0x00);
   Wire.endTransmission();
   //  range of gyro
-  Wire.beginTransmission(MPU6050_ADDR);
+  Wire.beginTransmission(MPU9250_ADDR);
   Wire.write(0x1B);
-  Wire.write(0x18);  //  0x00:250, 0x08:500, 0x10:1000, 0x18:2000deg/s
+  Wire.write(0x18);
   Wire.endTransmission();
 
-
-  delay(300);
   while (1) {
+    PalletInfo pallet_ret;
     //  send start address
-    Wire.beginTransmission(MPU6050_ADDR);
-    Wire.write(MPU6050_AX);
+    Wire.beginTransmission(MPU9250_ADDR);
+    Wire.write(MPU9250_AX);
     Wire.endTransmission(false);
     //  request 14bytes (int16 x 7)
-    Wire.requestFrom(MPU6050_ADDR, 14);
+    Wire.requestFrom(MPU9250_ADDR, 14);
     while (Wire.available() < 14);
     //  get 14bytes
     AccX = Wire.read() << 8;  AccX |= Wire.read();
@@ -93,30 +124,10 @@ void task1(void* arg) {
     GyroY = Wire.read() << 8; GyroY |= Wire.read();
     GyroZ = Wire.read() << 8; GyroZ |= Wire.read();
     //  debug monitor
-    printf("%d, %d, %d\n", AccX, AccY, AccZ);
-
+    xQueueReceive(PalletInfoQueue, &pallet_ret, 0);
+    printf("%d, %d, %d, %d, %d\n", AccX, AccY, AccZ, pallet_ret.color * 2000, pallet_ret.reset_flag * -1230);
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
   }
-
-}
-void setup() {
-
-  // Initialize the M5Stack object
-  M5.begin();
-  // LCD display
-  M5.Lcd.print("Hello World!");
-  M5.Lcd.print("M5Stack is running successfully!");
-  xTaskCreatePinnedToCore(task0, "Task0", 4096, NULL, 1, NULL, 0);
-  xTaskCreatePinnedToCore(task1, "Task1", 4096, NULL, 1, NULL, 1);
-  if (restoreConfig()) {
-    if (checkConnection()) {
-      settingMode = false;
-      startWebServer();
-      return;
-    }
-  }
-  settingMode = true;
-  setupMode();
 }
 
 boolean restoreConfig() {
@@ -313,9 +324,49 @@ String urlDecode(String input) {
   s.replace("%60", "`");
   return s;
 }
+void serverTask(void* arg) {
+
+  const uint32_t calledFrequency = 100;
+  TickType_t xLastWakeTime;
+  const TickType_t xFrequency = configTICK_RATE_HZ / calledFrequency;
+    if (restoreConfig()) {
+    if (checkConnection()) {
+      settingMode = false;
+      startWebServer();
+      return;
+    }
+  }
+  settingMode = true;
+  setupMode();
+  while (1) {
+    webServer.handleClient();
+    vTaskDelayUntil(&xLastWakeTime, xFrequency);
+  }
+}
+void setup() {
+
+  // Initialize the M5Stack object
+  M5.begin();
+  // LCD display
+  M5.Lcd.print("Hello World!");
+  M5.Lcd.print("M5Stack is running successfully!");
+  xTaskCreatePinnedToCore(task0, "Task0", 4096, NULL, 1, NULL, 0);
+  xTaskCreatePinnedToCore(task1, "Task1", 4096, NULL, 1, NULL, 1);
+  xTaskCreatePinnedToCore(buttonTask, "ButonTask", 4096, NULL, 2, NULL, 1);
+  xTaskCreatePinnedToCore(serverTask, "ServerTask", 4096, NULL, 4, NULL, 1);
+  /*
+  if (restoreConfig()) {
+    if (checkConnection()) {
+      settingMode = false;
+      startWebServer();
+      return;
+    }
+  }
+  settingMode = true;
+  setupMode();*/
+}
+
 // the loop routine runs over and over again forever
 void loop() {
-  if (settingMode) {
-  }
-  webServer.handleClient();
+
 }
