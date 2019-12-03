@@ -17,10 +17,11 @@ Preferences preferences;
 WebServer webServer(80);
 int po;
 // the setup routine runs once when M5Stack starts up
-
-
-
-
+ 
+  
+float pos_x, pos_y;
+float vel_x, vel_y;
+  
 
 #define MPU9250_ADDR 0x68
 #define MPU9250_AX  0x3B
@@ -47,7 +48,7 @@ void task0(void* arg) {
   const uint32_t calledFrequency = 100;
   const TickType_t xFrequency = configTICK_RATE_HZ / calledFrequency;
   while (1) {
-    po = cnt;
+    po = (po + 1) % 1000;
     //printf("task2 thread_cnt=%ld\n", cnt++);
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
   }
@@ -79,9 +80,8 @@ void buttonTask(void* arg) {
 void task1(void* arg) {
   int cnt = 0;
   TickType_t xLastWakeTime;
-  const uint32_t calledFrequency = 100;
+  const uint32_t calledFrequency = 500;
   const TickType_t xFrequency = configTICK_RATE_HZ / calledFrequency;
-  //const TickType_t xFrequency = 100;
   int16_t AccX, AccY, AccZ;
   int16_t Temp;
   int16_t GyroX, GyroY, GyroZ;
@@ -106,13 +106,44 @@ void task1(void* arg) {
   Wire.write(0x18);
   Wire.endTransmission();
 
+	float AccX_offset, AccY_offset, AccZ_offset, Temp_offset;
+	float GyroX_offset, GyroY_offset, GyroZ_offset;
+	for(int i = 0; i < 1000; i++){
+    Wire.beginTransmission(MPU9250_ADDR);
+    Wire.write(MPU9250_AX);
+    Wire.endTransmission(false);
+    Wire.requestFrom(MPU9250_ADDR, 14);
+    while (Wire.available() < 14);
+    //  get 14bytes
+    int16_t tmp;
+    tmp = Wire.read() << 8;  tmp |= Wire.read();
+    AccX_offset += tmp;
+    tmp = Wire.read() << 8;  tmp |= Wire.read();
+    AccY_offset += tmp;
+    tmp = Wire.read() << 8;  tmp |= Wire.read();
+    AccZ_offset += tmp;
+    tmp = Wire.read() << 8;  tmp |= Wire.read();
+    Temp_offset += tmp;
+    tmp = Wire.read() << 8;  tmp |= Wire.read();
+    GyroX_offset += tmp;
+    tmp = Wire.read() << 8;  tmp |= Wire.read();
+    GyroY_offset += tmp;
+    tmp = Wire.read() << 8;  tmp |= Wire.read();
+    GyroZ_offset += tmp;
+	}
+	AccX_offset /= 1000.0;
+	AccY_offset /= 1000.0;
+	AccZ_offset /= 1000.0;
+	Temp_offset /= 1000.0;
+	GyroX_offset /= 1000.0;
+	GyroY_offset /= 1000.0;
+	GyroZ_offset /= 1000.0;
   while (1) {
     PalletInfo pallet_ret;
     //  send start address
     Wire.beginTransmission(MPU9250_ADDR);
     Wire.write(MPU9250_AX);
     Wire.endTransmission(false);
-    //  request 14bytes (int16 x 7)
     Wire.requestFrom(MPU9250_ADDR, 14);
     while (Wire.available() < 14);
     //  get 14bytes
@@ -124,8 +155,20 @@ void task1(void* arg) {
     GyroY = Wire.read() << 8; GyroY |= Wire.read();
     GyroZ = Wire.read() << 8; GyroZ |= Wire.read();
     //  debug monitor
+    const float factor = 16384.0 / 9.8;
+    vel_x += (AccX - AccX_offset) / factor / calledFrequency * 100.0;
+    vel_y += (AccY - AccY_offset) / factor / calledFrequency * 100.0;
+    float threshold = 100;
+    if(vel_x > threshold) vel_x = threshold;
+    else if(vel_x < -threshold) vel_x = -threshold;
+    if(vel_y > threshold) vel_y = threshold;
+    else if(vel_y < -threshold) vel_y = -threshold;
+    pos_x += vel_x / calledFrequency;
+    pos_y += vel_y / calledFrequency;
     xQueueReceive(PalletInfoQueue, &pallet_ret, 0);
-    printf("%d, %d, %d, %d, %d\n", AccX, AccY, AccZ, pallet_ret.color * 2000, pallet_ret.reset_flag * -1230);
+    //printf("%d, %d, %d, %d, %d\n", AccX, AccY, AccZ, pallet_ret.color * 2000, pallet_ret.reset_flag * -1230);
+    //printf("%f, %f, %f, %f, %f, %f\n", AccX - AccX_offset, AccY - AccY_offset, vel_x, vel_y, pos_x, pos_y);
+    printf("%f, %f\n", vel_x, vel_y);
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
   }
 }
@@ -182,8 +225,9 @@ void startWebServer() {
       s += "<form method=\"get\" action=\"setap\"><label>SSID: </label><select name=\"ssid\">";
       s += ssidList;
       s += "</select><br>Password: <input name=\"pass\" length=64 type=\"password\"><input type=\"submit\"></form>";
+      webServer.sendHeader("Access-Control-Allow-Origin", "*", false);
       webServer.send(200, "text/html", makePage("Wi-Fi Settings", s));
-    });
+    });    
     webServer.on("/position", []() {
       String s = "<h1>";
       s += String(po);
@@ -191,7 +235,14 @@ void startWebServer() {
       s += "<form method=\"get\" action=\"setap\"><label>SSID: </label><select name=\"ssid\">";
       s += ssidList;
       s += "</select><br>Password: <input name=\"pass\" length=64 type=\"password\"><input type=\"submit\"></form>";
-      webServer.send(200, "text/html", makePage("Wi-Fi Settings", s));
+      webServer.sendHeader("Access-Control-Allow-Origin", "*", false);
+      //webServer.send(200, "application/json", makePage("Wi-Fi Settings", s));
+      String info = "{\"x\":";
+      info += String(pos_x) + String(",");
+      info += String("\"y\":");
+      info += String(pos_y);
+      info += String("}");
+      webServer.send(200, "application/json", info);
     });
     webServer.on("/setap", []() {
       String ssid = urlDecode(webServer.arg("ssid"));
@@ -354,16 +405,7 @@ void setup() {
   xTaskCreatePinnedToCore(task1, "Task1", 4096, NULL, 1, NULL, 1);
   xTaskCreatePinnedToCore(buttonTask, "ButonTask", 4096, NULL, 2, NULL, 1);
   xTaskCreatePinnedToCore(serverTask, "ServerTask", 4096, NULL, 4, NULL, 1);
-  /*
-  if (restoreConfig()) {
-    if (checkConnection()) {
-      settingMode = false;
-      startWebServer();
-      return;
-    }
-  }
-  settingMode = true;
-  setupMode();*/
+
 }
 
 // the loop routine runs over and over again forever
