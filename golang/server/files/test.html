@@ -1,0 +1,52 @@
+<html>
+  <head>
+    <meta charset="UTF-8">
+  <script type="text/javascript">
+    function loop() {
+      var latest_x = 0;
+      var latest_y = 0;
+
+      var canvas = document.getElementById("canvas");
+      var ctx = canvas.getContext('2d');
+
+      const url = "http://localhost:8000/unko";
+
+      ctx.beginPath();
+
+      function drawLine(start_x, start_y, end_x, end_y) {
+        moveTo(start_x, start_y);
+        ctx.lineTo(end_x, end_y);
+        ctx.stroke();
+      }
+
+      function update_data() {
+        var request = new XMLHttpRequest();
+        request.open("GET", url);
+        request.timeout = 1000;
+        request.onreadystatechange = function() {
+          if(this.readystate == 4 || this.status != 200) {
+            return;
+          }
+          if(!this.response) {
+            return;
+          }
+          console.log(this.response)
+
+          const position = this.response
+          drawLine(latest_x, latest_y, position.x, position.y);
+          latest_x = position.x;
+          latest_y = position.y;
+        }
+        request.responseType = "json";
+        request.send(null);
+      }
+        
+      setInterval(update_data, 1000);
+    }
+  </script>
+  </head>
+  <body onload="loop()">
+    <canvas id="canvas" width="1000" height="1000">
+    </canvas>
+  </body>
+</html>
