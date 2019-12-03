@@ -10,7 +10,7 @@ import (
 func main() {
     handler := NewTestHandler(0,0)
     http.Handle("/", http.StripPrefix("/", http.FileServer(http.Dir("/code/files"))))
-    http.Handle("/unko", handler)
+    http.Handle("/position", handler)
 	log.Fatal(http.ListenAndServe(":8000", nil))
 }
 
@@ -38,5 +38,6 @@ func (handler *TestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
     handler.pos_x += 10
     handler.pos_y += 10
     w.Header().Set("Content-Type", "application/json")
+    w.Header().Set("Access-Control-Allow-Origin", "*")
     w.Write(pos_json)
 }
