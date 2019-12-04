@@ -29,6 +29,8 @@
       ctx.arc(current_pos.x, current_pos.y, 2, 0, 2*Math.PI, 0);
       ctx.fill();
       ctx.closePath();
+      ctx.lineWidth = 5;
+      ctx.lineCap = 'round';
       for(line of line_list) {
         ctx.beginPath();
         ctx.strokeStyle = line.color;
@@ -88,7 +90,7 @@
               stroke_style = 'rgb(255, 0, 0)';
               break;
             case 3:
-              stroke_style = 'rgb(0, 255, 0)';
+              stroke_style = 'rgb(102, 102, 255)';
               break;
           }
 
