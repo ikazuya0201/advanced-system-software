@@ -2,27 +2,62 @@
   <head>
     <meta charset="UTF-8">
   <script type="text/javascript">
-    function loop() {
-      var last_x = 0;
-      var last_y = 0;
-      var current_color = 0;
-      var last_draw = false;
+    class Position {
+      constructor(x, y) {
+        this.x = x;
+        this.y = y;
+      }
+    }
 
-      var canvas = document.getElementById("canvas");
-      var ctx = canvas.getContext('2d');
+    class Line {
+      constructor(start_pos, end_pos, color) {
+        this.start_pos = start_pos;
+        this.end_pos = end_pos;
+        this.color = color;
+      }
+    }
+
+    function drawLine(ctx, start_x, start_y, end_x, end_y) {
+      ctx.moveTo(start_x, start_y);
+      ctx.lineTo(end_x, end_y);
+      ctx.stroke();
+    }
+
+    function update_canvas(width, height, ctx, line_list, current_pos) {
+      ctx.clearRect(0, 0, width, height);
+      ctx.beginPath();
+      ctx.arc(current_pos.x, current_pos.y, 2, 0, 2*Math.PI, 0);
+      ctx.fill();
+      ctx.closePath();
+      for(line of line_list) {
+        ctx.beginPath();
+        ctx.strokeStyle = line.color;
+        drawLine(
+          ctx,
+          line.start_pos.x, 
+          line.start_pos.y,
+          line.end_pos.x,
+          line.end_pos.y,
+        );
+        ctx.closePath();
+      }
+    }
+
+    function loop() {
+      let last_pos = new Position(0,0);
+      let last_draw = false;
+
+      let line_list = [];
+
+      let canvas = document.getElementById("canvas");
+      let ctx = canvas.getContext('2d');
 
       const url = "http://192.168.4.1/position";
 
       ctx.beginPath();
 
-      function drawLine(start_x, start_y, end_x, end_y) {
-        ctx.moveTo(start_x, start_y);
-        ctx.lineTo(end_x, end_y);
-        ctx.stroke();
-      }
-
       function update_data() {
-        var request = new XMLHttpRequest();
+        let request = new XMLHttpRequest();
         request.open("GET", url);
         request.timeout = 1000;
         request.onreadystatechange = function() {
@@ -36,51 +71,44 @@
 
           const reset = this.response.reset;
           if(reset) {
-            ctx.closePath();
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.beginPath();
+            line_list = [];
             return;
           }
 
           const color = this.response.color;
-          if(current_color != color) {
-            current_color = color;
-            ctx.closePath();
-            switch(color) {
-              case 0:
-                ctx.strokeStyle = 'rgb(0,0,0)';
-                break;
-              case 1:
-                ctx.strokeStyle = 'rgb(0, 0, 255)';
-                break;
-              case 2:
-                ctx.strokeStyle = 'rgb(255, 0, 0)';
-                break;
-              case 3:
-                ctx.strokeStyle = 'rgb(0, 255, 0)';
-                break;
-            }
-            ctx.beginPath();
+          let stroke_style = '';
+          switch(color) {
+            case 0:
+              stroke_style = 'rgb(0,0,0)';
+              break;
+            case 1:
+              stroke_style = 'rgb(0, 0, 255)';
+              break;
+            case 2:
+              stroke_style = 'rgb(255, 0, 0)';
+              break;
+            case 3:
+              stroke_style = 'rgb(0, 255, 0)';
+              break;
           }
 
-          const position = this.response.position
+          const position = new Position(
+            this.response.position.x, 
+            this.response.position.y,
+          );
 
+          const line = new Line(
+            last_pos,
+            position,
+            stroke_style,
+          );
 
           const draw = this.response.draw;
           if(draw) {
-            if(!last_draw) {
-              last_x = position.x;
-              last_y = position.y;
-              last_draw = draw;
-            }
-          } else {
-            last_draw = draw;
-            return;
+            line_list.push(line);
           }
-
-          drawLine(last_x, last_y, position.x, position.y);
-          last_x = position.x;
-          last_y = position.y;
+          update_canvas(canvas.width, canvas.height, ctx, line_list, position);
+          last_pos = position;
         }
         request.responseType = "json";
         request.send(null);
