@@ -15,13 +15,9 @@ String wifi_password;
 // wifi config store
 Preferences preferences;
 WebServer webServer(80);
-int po;
 // the setup routine runs once when M5Stack starts up
- 
-  
-float pos_x, pos_y;
-float vel_x, vel_y;
-  
+
+
 
 #define MPU9250_ADDR 0x68
 #define MPU9250_AX  0x3B
@@ -40,7 +36,17 @@ struct PalletPosition {
 struct PalletInfo {
   uint8_t color;
   boolean reset_flag;
+  boolean draw_flag;
 };
+
+
+float pos_x, pos_y;
+float vel_x, vel_y;
+PalletInfo pallet_info_g;
+uint32_t time_stamp;
+
+const float threshold_x = 600;
+const float threshold_y = 350;
 xQueueHandle PalletInfoQueue = xQueueCreate(1, sizeof(PalletInfo));
 void task0(void* arg) {
   int cnt = 0;
@@ -48,7 +54,7 @@ void task0(void* arg) {
   const uint32_t calledFrequency = 100;
   const TickType_t xFrequency = configTICK_RATE_HZ / calledFrequency;
   while (1) {
-    po = (po + 1) % 1000;
+    time_stamp++;
     //printf("task2 thread_cnt=%ld\n", cnt++);
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
   }
@@ -57,7 +63,7 @@ void buttonTask(void* arg) {
   uint8_t buttonA_GPIO = 37;
   uint8_t buttonB_GPIO = 38;
   uint8_t buttonC_GPIO = 39;
-  uint8_t COLOR_TYPE = 5;
+  uint8_t COLOR_TYPE = 4;
   const uint32_t calledFrequency = 100;
   TickType_t xLastWakeTime;
   const TickType_t xFrequency = configTICK_RATE_HZ / calledFrequency;
@@ -67,11 +73,15 @@ void buttonTask(void* arg) {
   PalletInfo pallet_info;
   bool last_buttonA = false;
   while (1) {
-    if (digitalRead(buttonA_GPIO) == 0){
-      if(last_buttonA == true) pallet_info.color = (pallet_info.color + 1) % COLOR_TYPE;
+    if (digitalRead(buttonA_GPIO) == 0) {
+      if (last_buttonA == true) pallet_info.color = (pallet_info.color + 1) % COLOR_TYPE;
+      pallet_info_g.color = pallet_info.color;
     }
     last_buttonA = digitalRead(buttonA_GPIO);
     pallet_info.reset_flag = (digitalRead(buttonC_GPIO) == 0) ? true : false;
+    pallet_info_g.reset_flag = pallet_info.reset_flag;
+    pallet_info.draw_flag = (digitalRead(buttonB_GPIO) == 0) ? true : false;
+    pallet_info_g.draw_flag = pallet_info.draw_flag;
     xQueueSendToBack(PalletInfoQueue, &pallet_info, 0);
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
   }
@@ -106,9 +116,9 @@ void task1(void* arg) {
   Wire.write(0x18);
   Wire.endTransmission();
 
-	float AccX_offset, AccY_offset, AccZ_offset, Temp_offset;
-	float GyroX_offset, GyroY_offset, GyroZ_offset;
-	for(int i = 0; i < 1000; i++){
+  float AccX_offset, AccY_offset, AccZ_offset, Temp_offset;
+  float GyroX_offset, GyroY_offset, GyroZ_offset;
+  for (int i = 0; i < 1000; i++) {
     Wire.beginTransmission(MPU9250_ADDR);
     Wire.write(MPU9250_AX);
     Wire.endTransmission(false);
@@ -130,14 +140,14 @@ void task1(void* arg) {
     GyroY_offset += tmp;
     tmp = Wire.read() << 8;  tmp |= Wire.read();
     GyroZ_offset += tmp;
-	}
-	AccX_offset /= 1000.0;
-	AccY_offset /= 1000.0;
-	AccZ_offset /= 1000.0;
-	Temp_offset /= 1000.0;
-	GyroX_offset /= 1000.0;
-	GyroY_offset /= 1000.0;
-	GyroZ_offset /= 1000.0;
+  }
+  AccX_offset /= 1000.0;
+  AccY_offset /= 1000.0;
+  AccZ_offset /= 1000.0;
+  Temp_offset /= 1000.0;
+  GyroX_offset /= 1000.0;
+  GyroY_offset /= 1000.0;
+  GyroZ_offset /= 1000.0;
   while (1) {
     PalletInfo pallet_ret;
     //  send start address
@@ -156,13 +166,12 @@ void task1(void* arg) {
     GyroZ = Wire.read() << 8; GyroZ |= Wire.read();
     //  debug monitor
     const float factor = 16384.0 / 9.8;
-    vel_x += (AccX - AccX_offset) / factor / calledFrequency * 100.0;
+    vel_x += -(AccX - AccX_offset) / factor / calledFrequency * 100.0;
     vel_y += (AccY - AccY_offset) / factor / calledFrequency * 100.0;
-    float threshold = 100;
-    if(vel_x > threshold) vel_x = threshold;
-    else if(vel_x < -threshold) vel_x = -threshold;
-    if(vel_y > threshold) vel_y = threshold;
-    else if(vel_y < -threshold) vel_y = -threshold;
+    if (vel_x > threshold_x) vel_x = threshold_x;
+    else if (vel_x < -threshold_x) vel_x = -threshold_x;
+    if (vel_y > threshold_y) vel_y = threshold_y;
+    else if (vel_y < -threshold_y) vel_y = -threshold_y;
     pos_x += vel_x / calledFrequency;
     pos_y += vel_y / calledFrequency;
     xQueueReceive(PalletInfoQueue, &pallet_ret, 0);
@@ -227,20 +236,30 @@ void startWebServer() {
       s += "</select><br>Password: <input name=\"pass\" length=64 type=\"password\"><input type=\"submit\"></form>";
       webServer.sendHeader("Access-Control-Allow-Origin", "*", false);
       webServer.send(200, "text/html", makePage("Wi-Fi Settings", s));
-    });    
+    });
     webServer.on("/position", []() {
       String s = "<h1>";
-      s += String(po);
+      //s += String(po);
       s += "</h1><p>Please enter your password by selecting the SSID.</p>";
       s += "<form method=\"get\" action=\"setap\"><label>SSID: </label><select name=\"ssid\">";
       s += ssidList;
       s += "</select><br>Password: <input name=\"pass\" length=64 type=\"password\"><input type=\"submit\"></form>";
       webServer.sendHeader("Access-Control-Allow-Origin", "*", false);
       //webServer.send(200, "application/json", makePage("Wi-Fi Settings", s));
-      String info = "{\"x\":";
-      info += String(pos_x) + String(",");
-      info += String("\"y\":");
-      info += String(pos_y);
+      String info = "{";
+      info += "\"position\":";
+      info += "{";
+      info += "\"x\":" + String(vel_x + threshold_x) + String(",");
+      info += "\"y\":" + String(vel_y + threshold_y) + String("");
+      info += "},";
+      info += "\"color\":" + String(pallet_info_g.color) + String(",");
+      info += "\"reset\":";
+      info += (pallet_info_g.reset_flag) ? String("true") : String("false");
+      info += String(",");
+      info += "\"draw\":";
+      info += (pallet_info_g.draw_flag) ? String("true") : String("false");
+      info += String(",");
+      info += "\"time_stamp\":" + String(time_stamp) + String("");
       info += String("}");
       webServer.send(200, "application/json", info);
     });
@@ -380,7 +399,7 @@ void serverTask(void* arg) {
   const uint32_t calledFrequency = 100;
   TickType_t xLastWakeTime;
   const TickType_t xFrequency = configTICK_RATE_HZ / calledFrequency;
-    if (restoreConfig()) {
+  if (restoreConfig()) {
     if (checkConnection()) {
       settingMode = false;
       startWebServer();
