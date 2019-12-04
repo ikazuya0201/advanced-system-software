@@ -3,18 +3,20 @@
     <meta charset="UTF-8">
   <script type="text/javascript">
     function loop() {
-      var latest_x = 0;
-      var latest_y = 0;
+      var last_x = 0;
+      var last_y = 0;
+      var current_color = 0;
+      var last_draw = false;
 
       var canvas = document.getElementById("canvas");
       var ctx = canvas.getContext('2d');
 
-      const url = "http://localhost:8000/position";
+      const url = "http://192.168.4.1/position";
 
       ctx.beginPath();
 
       function drawLine(start_x, start_y, end_x, end_y) {
-        moveTo(start_x, start_y);
+        ctx.moveTo(start_x, start_y);
         ctx.lineTo(end_x, end_y);
         ctx.stroke();
       }
@@ -32,21 +34,64 @@
           }
           console.log(this.response)
 
-          const position = this.response
-          drawLine(latest_x, latest_y, position.x, position.y);
-          latest_x = position.x;
-          latest_y = position.y;
+          const reset = this.response.reset;
+          if(reset) {
+            ctx.closePath();
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.beginPath();
+            return;
+          }
+
+          const color = this.response.color;
+          if(current_color != color) {
+            current_color = color;
+            ctx.closePath();
+            switch(color) {
+              case 0:
+                ctx.strokeStyle = 'rgb(0,0,0)';
+                break;
+              case 1:
+                ctx.strokeStyle = 'rgb(0, 0, 255)';
+                break;
+              case 2:
+                ctx.strokeStyle = 'rgb(255, 0, 0)';
+                break;
+              case 3:
+                ctx.strokeStyle = 'rgb(0, 255, 0)';
+                break;
+            }
+            ctx.beginPath();
+          }
+
+          const position = this.response.position
+
+
+          const draw = this.response.draw;
+          if(draw) {
+            if(!last_draw) {
+              last_x = position.x;
+              last_y = position.y;
+              last_draw = draw;
+            }
+          } else {
+            last_draw = draw;
+            return;
+          }
+
+          drawLine(last_x, last_y, position.x, position.y);
+          last_x = position.x;
+          last_y = position.y;
         }
         request.responseType = "json";
         request.send(null);
       }
         
-      setInterval(update_data, 1000);
+      setInterval(update_data, 100);
     }
   </script>
   </head>
   <body onload="loop()">
-    <canvas id="canvas" width="1000" height="1000">
+    <canvas id="canvas" width="1200" height="700">
     </canvas>
   </body>
 </html>
